@@ -27,32 +27,18 @@
  #ifndef ON_WINDOWS
   #define ON_WINDOWS 1
  #endif
- #define NO_SYMLINKS 1
- #define NO_PERMS 1
- #define NO_SIGACTION 1
  #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
  #endif
  #include <windows.h>
  #include <io.h>
- #define STAT jc_win_stat
-// const char dir_sep = '\\';
-
 #else /* Not Windows */
- #include <sys/stat.h>
- #define STAT stat
-// const char dir_sep = '/';
  #ifdef UNICODE
   #error Do not define UNICODE on non-Windows platforms.
   #undef UNICODE
  #endif
 #endif /* _WIN32 || __CYGWIN__ */
 
-/* Windows + Unicode compilation */
-#ifdef UNICODE
- int out_mode = _O_TEXT;
- int err_mode = _O_TEXT;
-#endif /* UNICODE */
 
 static char program_name[PATH_MAX + 4];
 static FILE *fp1, *fp2, *fp3;
@@ -94,11 +80,7 @@ int main(int argc, char **argv)
 #endif
 {
 	char *buf1, *buf2, *file1, *file2, *file3;
-#ifdef ON_WINDOWS
-	struct jc_winstat stat1, stat2;
-#else
-	struct stat stat1, stat2;
-#endif
+	struct JC_STAT stat1, stat2;
 	off_t remain;
 	off_t read1, read2, write;
 	off_t progress;
@@ -167,8 +149,8 @@ int main(int argc, char **argv)
 	if (!fp2) goto error_file2;
 
 	/* File sizes must match; sizes also needed for loop */
-	if (STAT(argv[1], &stat1) != 0) goto error_file1;
-	if (STAT(argv[2], &stat2) != 0) goto error_file2;
+	if (jc_stat(argv[1], &stat1) != 0) goto error_file1;
+	if (jc_stat(argv[2], &stat2) != 0) goto error_file2;
 //	fprintf(stderr, "DEBUG: size %lld,%lld dev %d,%d ino %lld,%lld\n", stat1.st_size, stat2.st_size, stat1.st_dev, stat2.st_dev, stat1.st_ino, stat2.st_ino);
 	/* Hard link protection check */
 	if (stat1.st_ino == stat2.st_ino && stat1.st_dev == stat2.st_dev) goto error_same_file;
@@ -281,7 +263,7 @@ error_file2:
 	fprintf(stderr, "\nError opening/reading "); jc_fwprint(stderr, file2, 1);
 	exit(EXIT_FAILURE);
 error_file3:
-	fprintf(stderr, "\nError opening/reading "); jc_fwprint(stderr, file3, 1);
+	fprintf(stderr, "\nError opening "); jc_fwprint(stderr, file3, 1);
 	exit(EXIT_FAILURE);
 error_file_sizes:
 	fprintf(stderr, "\nError: file sizes are not identical\n");

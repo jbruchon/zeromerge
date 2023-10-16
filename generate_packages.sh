@@ -57,7 +57,7 @@ PKGNAME="${NAME}-${VER}-$TA"
 echo "Generating package for: $PKGNAME"
 mkdir -p "$PKGNAME"
 test ! -d "$PKGNAME" && echo "Can't create directory for package" && exit 1
-cp CHANGES README.md LICENSE $PKGNAME/
+cp CHANGES.txt README.md LICENSE.txt $PKGNAME/
 if [ -d "../libjodycode" ]
 	then
 	echo "Rebuilding nearby libjodycode first"

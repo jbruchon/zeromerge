@@ -105,7 +105,7 @@ LDFLAGS += $(LINK_OPTIONS) $(LDFLAGS_EXTRA)
 OBJS += libjodycode_check.o zeromerge.o
 
 
-all: libjodycode_hint $(PROGRAM_NAME)
+all: libjodycode_hint $(PROGRAM_NAME) dynamic_jc
 
 dynamic_jc: $(PROGRAM_NAME)
 	$(CC) $(CFLAGS) $(OBJS) -Wl,-Bdynamic $(LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX)
@@ -121,7 +121,7 @@ static_stripped: $(PROGRAM_NAME) static
 	strip $(PROGRAM_NAME)
 
 $(PROGRAM_NAME): $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX)
+	:
 
 winres.o: winres.rc winres.manifest.xml
 	./tune_winres.sh

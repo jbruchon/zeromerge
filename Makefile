@@ -98,10 +98,6 @@ endif
 CFLAGS += $(COMPILER_OPTIONS) $(CFLAGS_EXTRA)
 LDFLAGS += $(LINK_OPTIONS) $(LDFLAGS_EXTRA)
 
-# ADDITIONAL_OBJECTS - some platforms will need additional object files
-# to support features not supplied by their vendor. Eg: GNU getopt()
-#ADDITIONAL_OBJECTS += getopt.o
-
 OBJS += libjodycode_check.o zeromerge.o
 
 

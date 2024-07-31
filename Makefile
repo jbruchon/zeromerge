@@ -45,6 +45,13 @@ COMPILER_OPTIONS += -fdata-sections -ffunction-sections
 LINK_OPTIONS += -Wl,--gc-sections
 endif
 
+# Are we running on a Windows OS?
+ifeq ($(OS), Windows_NT)
+ ifndef NO_WINDOWS
+  ON_WINDOWS=1
+ endif
+endif
+
 # Debugging code inclusion
 ifdef LOUD
 DEBUG=1
@@ -61,20 +68,28 @@ else
 #COMPILER_OPTIONS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 endif
 
+
 # MinGW needs this for printf() conversions to work
-ifeq ($(OS), Windows_NT)
-ifndef NO_UNICODE
-	UNICODE=1
-	COMPILER_OPTIONS += -municode
-	SUFFIX=.exe
-endif
-	COMPILER_OPTIONS += -D__USE_MINGW_ANSI_STDIO=1 -DON_WINDOWS=1
-	UNAME_S=$(shell uname -s)
-	ifeq ($(UNAME_S), MINGW32_NT-5.1)
-		OBJS += winres_xp.o
-	else
-		OBJS += winres.o
-	endif
+ifdef ON_WINDOWS
+ ifndef NO_UNICODE
+  UNICODE=1
+  COMPILER_OPTIONS += -municode
+ endif
+ SUFFIX=.exe
+ SO_EXT=.dll
+ LIB_EXT=.lib
+# COMPILER_OPTIONS += -D__USE_MINGW_ANSI_STDIO=1
+ COMPILER_OPTIONS += -DON_WINDOWS=1
+ ifeq ($(UNAME_S), MINGW32_NT-5.1)
+  OBJS += winres_xp.o
+ else
+  OBJS += winres.o
+ endif
+ override undefine ENABLE_DEDUPE
+ DISABLE_DEDUPE = 1
+else
+ SO_EXT=.so
+ LIB_EXT=.a
 endif
 
 
@@ -84,13 +99,14 @@ ifndef IGNORE_NEARBY_JC
   $(info Found and using nearby libjodycode at ../libjodycode)
   COMPILER_OPTIONS += -I../libjodycode -L../libjodycode
   ifeq ("$(wildcard ../libjodycode/version.o)","")
-   $(error You must build libjodycode before building $(PROGRAM_NAME))
+   $(error You must build libjodycode before building zeromerge)
   endif
  endif
- ifdef FORCE_JC_DLL
-  LINK_OPTIONS += -l:../libjodycode/libjodycode.dll
+ STATIC_LDFLAGS += ../libjodycode/libjodycode$(LIB_EXT)
+ ifdef ON_WINDOWS
+  DYN_LDFLAGS += -l:../libjodycode/libjodycode$(SO_EXT)
  else
-  LINK_OPTIONS += -ljodycode
+  DYN_LDFLAGS += -ljodycode
  endif
 endif
 
@@ -104,17 +120,16 @@ OBJS += libjodycode_check.o zeromerge.o
 all: libjodycode_hint $(PROGRAM_NAME) dynamic_jc
 
 dynamic_jc: $(PROGRAM_NAME)
-	$(CC) $(CFLAGS) $(OBJS) -Wl,-Bdynamic $(LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX)
+	$(CC) $(CFLAGS) $(OBJS) $(BDYNAMIC) $(LDFLAGS) $(DYN_LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX)
 
 static_jc: $(PROGRAM_NAME)
-	$(CC) $(CFLAGS) $(OBJS) -Wl,-Bstatic $(LDFLAGS) -Wl,-Bdynamic -o $(PROGRAM_NAME)$(SUFFIX)
+	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) $(STATIC_LDFLAGS) $(BDYNAMIC) -o $(PROGRAM_NAME)$(SUFFIX)
 
 static: $(PROGRAM_NAME)
-	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX) -static
+	$(CC) $(CFLAGS) $(OBJS) -static $(LDFLAGS) $(STATIC_LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX)
 
 static_stripped: $(PROGRAM_NAME) static
-	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $(PROGRAM_NAME)$(SUFFIX) -static
-	strip $(PROGRAM_NAME)
+	-strip $(PROGRAM_NAME)$(SUFFIX)
 
 $(PROGRAM_NAME): $(OBJS)
 	:
@@ -162,4 +177,4 @@ package:
 	+./generate_packages.sh
 
 libjodycode_hint:
-	$(info hint: if ../libjodycode is built but jdupes won't run, try doing 'make static_jc')
+	$(info hint: if ../libjodycode is built but zeromerge won't run, try doing 'make static_jc')

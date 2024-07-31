@@ -118,8 +118,6 @@ int main(int argc, char **argv)
 		jc_print_error(wa_err);
 		exit(EXIT_FAILURE);
 	}
-	/* fix up __argv so getopt etc. don't crash */
-	__argv = argv;
 	jc_set_output_modes(JC_MODE_UTF16_TTY, JC_MODE_UTF16_TTY);
 #endif /* UNICODE */
 

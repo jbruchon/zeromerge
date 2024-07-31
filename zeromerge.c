@@ -113,7 +113,7 @@ int main(int argc, char **argv)
 	int wa_err;
 	argv = (char **)malloc(sizeof(char *) * (size_t)argc);
 	if (!argv) jc_oom("main() unicode argv");
-	wa_err = jc_widearg_to_argv(argc, wargv, argv);
+	wa_err = jc_widearg_to_argv(argc, wargv, &argv);
 	if (wa_err != 0) {
 		jc_print_error(wa_err);
 		exit(EXIT_FAILURE);

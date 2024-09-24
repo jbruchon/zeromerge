@@ -59,7 +59,7 @@ static void version(void)
 	printf("Linked to libjodycode %s (%s)\n", LIBJODYCODE_VER, LIBJODYCODE_VERDATE);
 	printf("Read buffer size is %u KiB\n", (unsigned int)(READSIZE >> 10));
 	printf("\nLatest versions and support:\n");
-	printf("        https://github.com/jbruchon/zeromerge\n");
+	printf("        https://codeberg.org/jbruchon/zeromerge\n");
 	printf("\nPlease consider supporting continued development with funding options at:\n");
 	printf("        https://www.JodyBruchon.com/\n\n");
 	return;

@@ -3,7 +3,7 @@
  * Code to embed the libjodycode version info and check against the currently
  * linked libjodycode to check for and report incompatibilities
  *
- * Copyright (C) 2023 by Jody Bruchon <jody@jodybruchon.com>
+ * Copyright (C) 2024 by Jody Bruchon <jody@jodybruchon.com>
  * Licensed under The MIT License */
 
 #include <stdio.h>

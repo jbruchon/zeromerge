@@ -1,5 +1,5 @@
 /* Zero Merge - combine files with empty (zero) blocks
- * Copyright (C) 2020-2023 by Jody Bruchon <jody@jodybruchon.com>
+ * Copyright (C) 2020-2024 by Jody Bruchon <jody@jodybruchon.com>
  * Distributed under The MIT License
  */
 

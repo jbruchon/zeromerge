@@ -158,6 +158,7 @@ uninstall: uninstalldirs
 	$(RM)	$(DESTDIR)$(BIN_DIR)/$(PROGRAM_NAME)$(SUFFIX)
 	$(RM)	$(DESTDIR)$(MAN_DIR)/$(PROGRAM_NAME).$(MAN_EXT)
 
+.PHONY: test
 test: zeromerge
 	./test.sh
 

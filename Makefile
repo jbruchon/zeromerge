@@ -114,7 +114,7 @@ endif
 CFLAGS += $(COMPILER_OPTIONS) $(CFLAGS_EXTRA)
 LDFLAGS += $(LINK_OPTIONS) $(LDFLAGS_EXTRA)
 
-OBJS += libjodycode_check.o zeromerge.o
+OBJS += libjodycode_check.o zeromerge.o helptext.o
 
 
 all: libjodycode_hint $(PROGRAM_NAME) dynamic_jc

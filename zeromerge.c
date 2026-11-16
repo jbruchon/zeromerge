@@ -1,16 +1,15 @@
 /* Zero Merge - combine files with empty (zero) blocks
- * Copyright (C) 2020-2024 by Jody Bruchon <jody@jodybruchon.com>
+ * Copyright (C) 2020-2026 by Jody Bruchon <jody@jodybruchon.com>
  * Distributed under The MIT License
  */
 
-#include <fcntl.h>
+#include <errno.h>
 #include <inttypes.h>
-#include <stdio.h>
+#include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <limits.h>
 
 #include <libjodycode.h>
 #include "libjodycode_check.h"
@@ -22,33 +21,15 @@
  #define READSIZE (1048576 * 16)
 #endif
 
-/* Detect Windows and modify as needed */
-#if defined _WIN32 || defined __CYGWIN__
- #ifndef ON_WINDOWS
-  #define ON_WINDOWS 1
- #endif
- #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
- #endif
- #include <windows.h>
- #include <io.h>
-#else /* Not Windows */
- #ifdef UNICODE
-  #error Do not define UNICODE on non-Windows platforms.
-  #undef UNICODE
- #endif
-#endif /* _WIN32 || __CYGWIN__ */
-
-
 static char program_name[PATH_MAX + 4];
 static FILE *fp1, *fp2, *fp3;
 
 
 void clean_exit(void)
 {
-	if (fp1) fclose(fp1);
-	if (fp2) fclose(fp2);
-	if (fp3) fclose(fp3);
+	if (fp1) jc_fclose(fp1);
+	if (fp2) jc_fclose(fp2);
+	if (fp3) jc_fclose(fp3);
 	return;
 }
 
@@ -79,57 +60,42 @@ int wmain(int argc, wchar_t **wargv)
 int main(int argc, char **argv)
 #endif
 {
-	char *buf1, *buf2, *file1, *file2, *file3;
+	char *buf1, *buf2;
+	const char *file1, *file2, *file3;
 	struct JC_STAT stat1, stat2;
-	off_t remain;
-	off_t read1, read2, write;
-	off_t progress;
+	int64_t remain, progress;
+	size_t read1, read2, written, idx;
+	int32_t err1 = 0, err2 = 0, err3 = 0;
 	int seconds = 0;
 	int stdout_tty = 0;
 	int hide_progress = 0;
 	const char *prog_suffix = "B";
 	int prog_shift = 0;
-	intmax_t processed = 0;
+	int64_t processed = 0;
+#ifdef UNICODE
+	char **argv;
+#endif
 
 	atexit(clean_exit);
 
-#ifdef ON_WINDOWS
-	/* Windows buffers our std output; don't let it do that */
-	if (setvbuf(stdout, NULL, _IONBF, 0) != 0 || setvbuf(stderr, NULL, _IONBF, 0) != 0)
-		fprintf(stderr, "warning: setvbuf() failed\n");
-	if (_isatty(_fileno(stdout))) stdout_tty = 1;
-#else
-	if (isatty(fileno(stdout))) stdout_tty = 1;
-#endif /* ON_WINDOWS */
-
 	/* Verify libjodycode compatibility before going further */
-	if (libjodycode_version_check(1, 0) != 0) {
-		exit(EXIT_FAILURE);
-	}
+	if (libjodycode_version_check(1, 0) != 0) exit(EXIT_FAILURE);
 
 #ifdef UNICODE
-	/* Create a UTF-8 **argv from the wide version */
-	static char **argv;
-	int wa_err;
-	argv = (char **)malloc(sizeof(char *) * (size_t)argc);
-	if (!argv) jc_oom("main() unicode argv");
-	wa_err = jc_widearg_to_argv(argc, wargv, &argv);
-	if (wa_err != 0) {
-		jc_print_error(wa_err);
-		exit(EXIT_FAILURE);
-	}
-	jc_set_output_modes(JC_MODE_UTF16_TTY, JC_MODE_UTF16_TTY);
-#endif /* UNICODE */
+	if (jc_setup_unicode_terminal(argc, wargv, &argv, &stdout_tty) != 0) exit(EXIT_FAILURE);
+#else
+	if (jc_setup_unicode_terminal(argc, argv, &argv, &stdout_tty) != 0) exit(EXIT_FAILURE);
+#endif
 
-	strncpy(program_name, argv[0], PATH_MAX);
+	snprintf(program_name, sizeof(program_name), "%s", argv[0]);
 
-	/* Help text if requested */
+	/* Help or version text if requested */
 	if (argc >= 2) {
-		if ((!jc_streq(argv[1], "-h") || !jc_streq(argv[1], "--help"))) {
+		if (!jc_streq(argv[1], "-h") || !jc_streq(argv[1], "--help")) {
 			usage();
 			exit(EXIT_SUCCESS);
 		}
-		if ((!jc_streq(argv[1], "-v") || !jc_streq(argv[1], "-V") || !jc_streq(argv[1], "--version"))) {
+		if (!jc_streq(argv[1], "-v") || !jc_streq(argv[1], "-V") || !jc_streq(argv[1], "--version")) {
 			version();
 			exit(EXIT_SUCCESS);
 		}
@@ -142,19 +108,22 @@ int main(int argc, char **argv)
 
 	/* Open files to merge */
 	fp1 = jc_fopen(file1, JC_FILE_MODE_RDONLY_SEQ);
-	fp2 = jc_fopen(file2, JC_FILE_MODE_RDONLY_SEQ);
 	if (!fp1) goto error_file1;
+	fp2 = jc_fopen(file2, JC_FILE_MODE_RDONLY_SEQ);
 	if (!fp2) goto error_file2;
 
 	/* File sizes must match; sizes also needed for loop */
-	if (jc_stat(argv[1], &stat1) != 0) goto error_file1;
-	if (jc_stat(argv[2], &stat2) != 0) goto error_file2;
-//	fprintf(stderr, "DEBUG: size %lld,%lld dev %d,%d ino %lld,%lld\n", stat1.st_size, stat2.st_size, stat1.st_dev, stat2.st_dev, stat1.st_ino, stat2.st_ino);
-	/* Hard link protection check */
+	if (jc_stat(file1, &stat1) != 0) goto error_file1;
+	if (jc_stat(file2, &stat2) != 0) goto error_file2;
+
+	/* Hard link / same-file protection checks */
 	if (stat1.st_ino == stat2.st_ino && stat1.st_dev == stat2.st_dev) goto error_same_file;
 	if (stat1.st_size != stat2.st_size) goto error_file_sizes;
-	if (stat1.st_size == 0) goto error_empty_file;
+	if (stat1.st_size <= 0) goto error_empty_file;
 	remain = stat1.st_size;
+
+	/* Refuse to overwrite an existing output file */
+	if (jc_access(file3, JC_F_OK) == 0) goto error_outfile_exists;
 
 	/* Set units for progress indicator */
 	for (int i = 0; jc_size_suffix[i].suffix != NULL; i++) {
@@ -182,51 +151,62 @@ int main(int argc, char **argv)
 
 	/* Main loop */
 	while (remain > 0) {
-		read1 = (off_t)jc_fread(buf1, 1, READSIZE, fp1);
-		read2 = (off_t)jc_fread(buf2, 1, READSIZE, fp2);
-		if ((read1 != read2)) goto error_short_read;
-		if (jc_ferror(fp1)) goto error_file1;
-		if (jc_ferror(fp2)) goto error_file2;
-		read1 = 0;
+		jc_errno = 0;
+		read1 = jc_fread(buf1, 1, READSIZE, fp1);
+		if (jc_ferror(fp1)) { err1 = jc_errno ? jc_errno : errno; goto error_short_read; }
 
+		jc_errno = 0;
+		read2 = jc_fread(buf2, 1, READSIZE, fp2);
+		if (jc_ferror(fp2)) { err2 = jc_errno ? jc_errno : errno; goto error_short_read; }
+
+		if (read1 != read2) goto error_short_read;
+		if (read2 == 0) break;
+
+		idx = 0;
 #if 0
 #if (defined __GNUC__ || defined __clang__) && (defined USE_AVX2 || defined USE_SSE2)
-		if (count >= 32) {
-			__builtin_cpu_init ();
+		if (read2 >= 32) {
+			__builtin_cpu_init();
 #ifdef USE_AVX2
-			if (__builtin_cpu_supports ("avx2")) read1 = zero_merge_avx2(read1, read2, buf1, buf2);
+			if (__builtin_cpu_supports("avx2")) idx = zero_merge_avx2(idx, read2, buf1, buf2);
 #endif
 #ifdef USE_SSE2
-			else if (__builtin_cpu_supports ("sse2")) read1 = zero_merge_sse2(read1, read2, buf1, buf2);
+			else if (__builtin_cpu_supports("sse2")) idx = zero_merge_sse2(idx, read2, buf1, buf2);
 #endif
 		}
 #endif
-#endif // 0
+#endif /* 0 */
+
 		/* Merge data between buffers */
-		for (; read1 < read2; read1++) {
+		for (; idx < read2; idx++) {
 			/* Error if both bytes are non-zero and different */
-			if (buf1[read1] != buf2[read1] && buf1[read1] != 0 && buf2[read1] != 0)
+			if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0)
 				goto error_different;
 			/* merge data into buf1 */
-			buf1[read1] |= buf2[read1];
+			buf1[idx] |= buf2[idx];
 		}
-		write = (off_t)jc_fwrite(buf1, 1, (size_t)read2, fp3);
-		if (write != read2) goto error_short_write;
-		remain -= read2;
-		processed += (intmax_t)read2;
 
-		/* Progress indicator - do not show if stdout not a TTY */
+		jc_errno = 0;
+		written = jc_fwrite(buf1, 1, read2, fp3);
+		if (written != read2 || jc_ferror(fp3)) {
+			err3 = jc_errno ? jc_errno : errno;
+			goto error_short_write;
+		}
+		remain -= (int64_t)read2;
+		processed += (int64_t)read2;
+
+		/* Progress indicator */
 		if (hide_progress == 0 && jc_alarm_ring != 0) {
 			seconds += jc_alarm_ring;
 			jc_alarm_ring = 0;
 			progress = stat1.st_size - remain;
 			if (stdout_tty == 1) printf("\r");
-			printf("[zeromerge] Progress: %" PRIdMAX "%%, %" PRIdMAX " of %" PRIdMAX " %s (%" PRIdMAX " %s/sec)",
-					(intmax_t)((progress * 100) / stat1.st_size),
-					(intmax_t)progress >> prog_shift,
-					(intmax_t)stat1.st_size >> prog_shift,
+			printf("[zeromerge] Progress: %" PRId64 "%%, %" PRId64 " of %" PRId64 " %s (%" PRId64 " %s/sec)",
+					(progress * 100) / stat1.st_size,
+					progress >> prog_shift,
+					stat1.st_size >> prog_shift,
 					prog_suffix,
-					(intmax_t)(processed / seconds) >> prog_shift,
+					(processed / seconds) >> prog_shift,
 					prog_suffix);
 			if (stdout_tty == 0) printf("\n");
 			fflush(stdout);
@@ -263,16 +243,20 @@ error_file2:
 error_file3:
 	fprintf(stderr, "\nError opening "); jc_fwprint(stderr, file3, 1);
 	exit(EXIT_FAILURE);
+error_outfile_exists:
+	fprintf(stderr, "\nError: output file already exists: "); jc_fwprint(stderr, file3, 1);
+	exit(EXIT_FAILURE);
 error_file_sizes:
 	fprintf(stderr, "\nError: file sizes are not identical\n");
 	exit(EXIT_FAILURE);
 error_short_read:
-	fprintf(stderr, "\nError: short read: file 1 %s, file2 %s\n",
-			jc_strerror(jc_ferror(fp1)), jc_strerror(jc_ferror(fp2)));
+	fprintf(stderr, "\nError: short read: file 1: %s, file 2: %s\n",
+			err1 ? jc_strerror(err1) : "unexpected EOF",
+			err2 ? jc_strerror(err2) : "unexpected EOF");
 	exit(EXIT_FAILURE);
 error_short_write:
-	fprintf(stderr, "\nError: short write (%ld != %ld or %ld): %s\n",
-			(long)write, (long)read1, (long)read2, jc_strerror(jc_ferror(fp3)));
+	fprintf(stderr, "\nError: short write (%zu != %zu): %s\n",
+			written, read2, err3 ? jc_strerror(err3) : "unknown error");
 	exit(EXIT_FAILURE);
 error_empty_file:
 	fprintf(stderr, "\nError: cannot merge files that are 0 bytes in size\n");

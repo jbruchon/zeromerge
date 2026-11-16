@@ -32,7 +32,7 @@ void version(void)
 	printf("\nLatest versions and support:\n");
 	printf("        https://codeberg.org/jbruchon/zeromerge\n");
 	printf("\nPlease consider supporting continued development with funding options at:\n");
-	printf("        https://www.JodyBruchon.com/\n\n");
+	printf("        https://www.jodybruchon.com/\n\n");
 	return;
 }
 

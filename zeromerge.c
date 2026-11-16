@@ -48,7 +48,7 @@ void clean_exit(void)
 }
 
 
-/* Helper to format bytes using libjodycode size suffixes[cite: 2] (pure whole integers, no decimals) */
+/* Helper to format bytes using libjodycode size suffixes (pure whole integers, no decimals) */
 static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 {
 	int i = 0, best_i = 0;

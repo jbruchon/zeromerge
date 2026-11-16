@@ -182,11 +182,11 @@ int main(int argc, char **argv)
 
 	/* Main loop */
 	while (remain > 0) {
-		read1 = (off_t)fread(buf1, 1, READSIZE, fp1);
-		read2 = (off_t)fread(buf2, 1, READSIZE, fp2);
+		read1 = (off_t)jc_fread(buf1, 1, READSIZE, fp1);
+		read2 = (off_t)jc_fread(buf2, 1, READSIZE, fp2);
 		if ((read1 != read2)) goto error_short_read;
-		if (ferror(fp1)) goto error_file1;
-		if (ferror(fp2)) goto error_file2;
+		if (jc_ferror(fp1)) goto error_file1;
+		if (jc_ferror(fp2)) goto error_file2;
 		read1 = 0;
 
 #if 0
@@ -210,7 +210,7 @@ int main(int argc, char **argv)
 			/* merge data into buf1 */
 			buf1[read1] |= buf2[read1];
 		}
-		write = (off_t)fwrite(buf1, 1, (size_t)read2, fp3);
+		write = (off_t)jc_fwrite(buf1, 1, (size_t)read2, fp3);
 		if (write != read2) goto error_short_write;
 		remain -= read2;
 		processed += (intmax_t)read2;
@@ -231,7 +231,7 @@ int main(int argc, char **argv)
 			if (stdout_tty == 0) printf("\n");
 			fflush(stdout);
 		}
-		if (feof(fp1) && feof(fp2)) break;
+		if (jc_feof(fp1) && jc_feof(fp2)) break;
 	}
 	ALIGNED_FREE(buf1);
 	ALIGNED_FREE(buf2);
@@ -268,11 +268,11 @@ error_file_sizes:
 	exit(EXIT_FAILURE);
 error_short_read:
 	fprintf(stderr, "\nError: short read: file 1 %s, file2 %s\n",
-			strerror(ferror(fp1)), strerror(ferror(fp2)));
+			jc_strerror(jc_ferror(fp1)), jc_strerror(jc_ferror(fp2)));
 	exit(EXIT_FAILURE);
 error_short_write:
 	fprintf(stderr, "\nError: short write (%ld != %ld or %ld): %s\n",
-			(long)write, (long)read1, (long)read2, strerror(ferror(fp3)));
+			(long)write, (long)read1, (long)read2, jc_strerror(jc_ferror(fp3)));
 	exit(EXIT_FAILURE);
 error_empty_file:
 	fprintf(stderr, "\nError: cannot merge files that are 0 bytes in size\n");

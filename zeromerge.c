@@ -46,6 +46,22 @@ static int stdout_tty = 0;
 static int quiet = 0;
 static struct progress_context pctx;
 
+static const char *abort_open_err = "failed to open input or temporary file";
+static const char *abort_link_err = "hard link failed";
+static const char *abort_write_err = "write error while updating files";
+static const char *abort_reopen_err = "failed to reopen merged output for copy";
+static const char *abort_diff_err = "file contents are different";
+static const char *abort_io_err = "read or write error during merge";
+
+
+static void merge_aborted(const char *reason)
+{
+	pctx.rejected_count++;
+	if (stdout_tty == 1) fprintf(stderr, "\r");
+	fprintf(stderr, "zeromerge: merge aborted: %s                                        \n", reason);
+	fflush(stderr);
+}
+
 
 void clean_exit(void)
 {
@@ -334,10 +350,7 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 				if (sf2) jc_fclose(sf2);
 				if (sout) jc_fclose(sout);
 				jc_remove(tmpname);
-				pctx.rejected_count++;
-				if (stdout_tty == 1) fprintf(stderr, "\r");
-				fprintf(stderr, "zeromerge: merge aborted: failed to open input or temporary file            \n");
-				fflush(stderr);
+				merge_aborted(abort_open_err);
 				continue;
 			}
 
@@ -353,12 +366,7 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 					jc_remove(f1->path);
 					jc_remove(f2->path);
 					if (jc_link(tmpname, f1->path) == 0 && jc_link(tmpname, f2->path) == 0) success = 1;
-					else {
-						pctx.rejected_count++;
-						if (stdout_tty == 1) fprintf(stderr, "\r");
-						fprintf(stderr, "zeromerge: merge aborted: hard link failed                                \n");
-						fflush(stderr);
-					}
+					else merge_aborted(abort_link_err);
 				} else {
 					FILE *tsrc = jc_fopen(tmpname, JC_FILE_MODE_RDONLY_SEQ);
 					FILE *tdest1 = jc_fopen(f1->path, JC_FILE_MODE_WRONLY_SEQ);
@@ -373,17 +381,9 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 							}
 						}
 						if (copy_ok) success = 1;
-						else {
-							pctx.rejected_count++;
-							if (stdout_tty == 1) fprintf(stderr, "\r");
-							fprintf(stderr, "zeromerge: merge aborted: write error while updating files            \n");
-							fflush(stderr);
-						}
+						else merge_aborted(abort_write_err);
 					} else {
-						pctx.rejected_count++;
-						if (stdout_tty == 1) fprintf(stderr, "\r");
-						fprintf(stderr, "zeromerge: merge aborted: failed to reopen merged output for copy       \n");
-						fflush(stderr);
+						merge_aborted(abort_reopen_err);
 					}
 					if (tsrc) jc_fclose(tsrc);
 					if (tdest1) jc_fclose(tdest1);
@@ -414,15 +414,9 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 					}
 				}
 			} else if (mres == -2) {
-				pctx.rejected_count++;
-				if (stdout_tty == 1) fprintf(stderr, "\r");
-				fprintf(stderr, "zeromerge: merge aborted: file contents are different                    \n");
-				fflush(stderr);
+				merge_aborted(abort_diff_err);
 			} else {
-				pctx.rejected_count++;
-				if (stdout_tty == 1) fprintf(stderr, "\r");
-				fprintf(stderr, "zeromerge: merge aborted: read or write error during merge                \n");
-				fflush(stderr);
+				merge_aborted(abort_io_err);
 			}
 			jc_remove(tmpname);
 		}

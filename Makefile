@@ -80,11 +80,7 @@ ifdef ON_WINDOWS
  LIB_EXT=.lib
 # COMPILER_OPTIONS += -D__USE_MINGW_ANSI_STDIO=1
  COMPILER_OPTIONS += -DON_WINDOWS=1
- ifeq ($(UNAME_S), MINGW32_NT-5.1)
-  OBJS += winres_xp.o
- else
-  OBJS += winres.o
- endif
+ OBJS += winres.o
  override undefine ENABLE_DEDUPE
  DISABLE_DEDUPE = 1
 else
@@ -163,10 +159,6 @@ zeromerge_simd_avx512.o: zeromerge_simd_avx512.c zeromerge_simd.h
 winres.o: winres.rc winres.manifest.xml
 	./tune_winres.sh
 	windres winres.rc winres.o
-
-winres_xp.o: winres_xp.rc
-	./tune_winres.sh
-	windres winres_xp.rc winres_xp.o
 
 installdirs:
 	test -e $(DESTDIR)$(BIN_DIR) || $(MKDIR) $(DESTDIR)$(BIN_DIR)

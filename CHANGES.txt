@@ -1,3 +1,14 @@
+zeromerge 2.0
+
+- IMPORTANT: Project license has changed from MIT to GPLv2
+- Add recursive scan-and-merge (-r) with dynamic hard linking/copying
+- Add -s SIZE[suffix] minimum file size filter for recursive mode
+- Add -C ## to trade more RAM for faster "spinning rust" merges
+- Add runtime x86 SIMD acceleration (SSE2, AVX2, AVX-512) with scalar fallback
+- Add -q/--quiet option to suppress all progress/completion messages
+- Fully convert to newer libjodycode file and error interfaces (FL 6)
+- Expand documentation with use cases and caveats
+
 zeromerge 1.3.1
 
 - Make progress indication more accurate

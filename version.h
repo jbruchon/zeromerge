@@ -4,7 +4,7 @@
 #ifndef ZEROMERGE_VERSION_H
 #define ZEROMERGE_VERSION_H
 
-#define VER "1.3.1"
-#define VERDATE "2023-08-11"
+#define VER "2.0"
+#define VERDATE "2026-11-20"
 
 #endif /* ZEROMERGE_VERSION_H */

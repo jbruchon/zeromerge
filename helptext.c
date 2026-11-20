@@ -29,10 +29,10 @@ void version(void)
 	printf("zeromerge %s (%s) by Jody Bruchon <jody@jodybruchon.com>\n", VER, VERDATE);
 	printf("Linked to libjodycode %s (%s)\n", LIBJODYCODE_VER, LIBJODYCODE_VERDATE);
 	printf("Distributed under the GNU General Public License v2\n");
-	printf("\nLatest versions and support:\n");
+	printf("Latest versions and support:\n");
 	printf("        https://codeberg.org/jbruchon/zeromerge\n");
-	printf("\nPlease consider supporting continued development with funding options at:\n");
-	printf("        https://www.jodybruchon.com/\n\n");
+	printf("Please consider supporting continued development with funding options at:\n");
+	printf("        https://www.jodybruchon.com/\n");
 	return;
 }
 

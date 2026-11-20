@@ -15,11 +15,12 @@ The program will abort if the file sizes differ or if any of the file data that 
 ### Usage
 
   zeromerge [-C ##] [-q] file1 file2 outfile
-  zeromerge [-C ##] [-q] -r [directories/files...]
+  zeromerge [-C ##] [-q] [-s SIZE[suffix]] -r [directories/files...]
 
 ### Options
 
 * **`-C ##`**: Set I/O chunk size index (0 = 4K, doubles up to 18 = 1GiB; default 12 = 16MiB).
+* **`-s SIZE[suffix]`**: Minimum file size to consider in -r mode; supports K/M/G/T[i]B suffixes.
 * **`-r, --recursive`**: Recursively scan paths, group files by size, merge matches, and link/copy.
 * **`-q, --quiet`**: Suppress all progress and completion output.
 * **`-h, --help`**: Display help and exit.

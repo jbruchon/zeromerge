@@ -5,13 +5,13 @@
 ERR=0
 
 PROG="./zeromerge"
-OPTS="-C 0"
+OPTS="-C 0 -q"
 OUT=test_output.bin
 
 ! $PROG -v && echo "Compile the program first" && exit 1
 
 
-echo -n "Testing 4K blocks:  "
+echo -n "Testing 4KBlkSize:  "
 rm -f "./$OUT"
 $PROG $OPTS test/missing1.bin test/missing2.bin "$OUT" >/dev/null
 if cmp -s test/correct.bin "$OUT"
@@ -19,7 +19,7 @@ if cmp -s test/correct.bin "$OUT"
 	else echo "FAILED"; ERR=1
 fi
 
-echo -n "Testing 4K + tail:  "
+echo -n "Testing 4KWithTail: "
 rm -f "./$OUT"
 $PROG $OPTS test/missing1_short.bin test/missing2_short.bin "$OUT" >/dev/null
 if cmp -s test/correct_short.bin "$OUT"
@@ -27,14 +27,14 @@ if cmp -s test/correct_short.bin "$OUT"
 	else echo "FAILED"; ERR=1
 fi
 
-echo -n "Testing mismatch1:  "
+echo -n "Testing Mismatch1:  "
 rm -f "./$OUT"
 if ! $PROG $OPTS test/missing1.bin test/mismatch.bin "$OUT" 2>/dev/null >/dev/null
 	then echo "PASSED"; ERR=0
 	else echo "FAILED"; ERR=1
 fi
 
-echo -n "Testing mismatch2:  "
+echo -n "Testing Mismatch2:  "
 rm -f "./$OUT"
 if ! $PROG $OPTS test/missing1_short.bin test/mismatch_short.bin "$OUT" >/dev/null 2>/dev/null
 	then echo "PASSED"; ERR=0

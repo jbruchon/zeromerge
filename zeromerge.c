@@ -1,6 +1,6 @@
 /* Zero Merge - combine files with empty (zero) blocks
  * Copyright (C) 2020-2026 by Jody Bruchon <jody@jodybruchon.com>
- * Distributed under the GNU General Public License v2 */
+ * Distributed under The GNU General Public License v2 */
 
 #include <errno.h>
 #include <inttypes.h>
@@ -23,20 +23,27 @@
  #define DEFAULT_READSIZE (1048576 * 16)
 #endif
 
-static FILE *fp1, *fp2, *fp3;
-static size_t active_readsize = DEFAULT_READSIZE;
-
 /* Progress tracking context for recursive mode */
 struct progress_context {
 	long merged_count;
+	long rejected_count;
 	int64_t bytes_merged_away;
 	int64_t io_byte_total;
 	int64_t session_seconds;
 	int64_t window_bytes[4];
-	int window_seconds[4];
+	int64_t window_seconds[4];
 	int window_head;
 	int window_size;
+	int64_t scanned_entries;
+	int64_t candidate_files;
 };
+
+static FILE *fp1, *fp2, *fp3;
+static size_t active_readsize = DEFAULT_READSIZE;
+static int64_t min_size = 0;
+static int stdout_tty = 0;
+static int quiet = 0;
+static struct progress_context pctx;
 
 
 void clean_exit(void)
@@ -48,7 +55,44 @@ void clean_exit(void)
 }
 
 
-/* Helper to format bytes using libjodycode size suffixes (pure whole integers, no decimals) */
+/* Parse minimum size argument with optional suffix */
+static int parse_min_size(const char *arg, int64_t *out_size)
+{
+	char *endptr = NULL;
+	unsigned long long val;
+	uint64_t mult = 1;
+
+	if (!arg || *arg == '\0' || *arg == '-') return -1;
+	errno = 0;
+	val = strtoull(arg, &endptr, 10);
+	if (errno != 0 || endptr == arg) return -1;
+
+	if (*endptr != '\0') {
+		int matched = 0;
+		for (int i = 0; jc_size_suffix[i].suffix != NULL; i++) {
+			if (!jc_streq(endptr, jc_size_suffix[i].suffix)) {
+				mult = (uint64_t)jc_size_suffix[i].multiplier;
+				matched = 1;
+				break;
+			}
+		}
+		if (!matched && endptr[1] == '\0') {
+			if (endptr[0] == 'b' || endptr[0] == 'B') { mult = 1ULL; matched = 1; }
+			else if (endptr[0] == 'k' || endptr[0] == 'K') { mult = 1ULL << 10; matched = 1; }
+			else if (endptr[0] == 'm' || endptr[0] == 'M') { mult = 1ULL << 20; matched = 1; }
+			else if (endptr[0] == 'g' || endptr[0] == 'G') { mult = 1ULL << 30; matched = 1; }
+			else if (endptr[0] == 't' || endptr[0] == 'T') { mult = 1ULL << 40; matched = 1; }
+		}
+		if (!matched) return -1;
+	}
+
+	if (mult > 0 && val > (uint64_t)INT64_MAX / mult) return -1;
+	*out_size = (int64_t)(val * mult);
+	return 0;
+}
+
+
+/* Format bytes using libjodycode size suffixes */
 static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 {
 	int i = 0, best_i = 0;
@@ -67,7 +111,7 @@ static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 
 
 /* Core merge execution between two open files into a third open file */
-static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size, size_t readsize, struct progress_context *pctx, int stdout_tty, int quiet_mode)
+static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size, size_t readsize)
 {
 	char *buf1 = NULL, *buf2 = NULL;
 	int64_t remain = size;
@@ -102,38 +146,37 @@ static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size,
 		if (written != read2 || jc_ferror(dest)) goto cleanup;
 
 		remain -= (int64_t)read2;
-		if (pctx) pctx->io_byte_total += (int64_t)read2;
+		pctx.io_byte_total += (int64_t)read2;
 
-		if (!quiet_mode && pctx && jc_alarm_ring != 0) {
-			pctx->session_seconds += (int64_t)jc_alarm_ring;
+		if (quiet == 0 && jc_alarm_ring != 0) {
+			pctx.session_seconds += (int64_t)jc_alarm_ring;
 			jc_alarm_ring = 0;
 
-			/* Update sliding window */
-			pctx->window_head = (pctx->window_head + 1) % 4;
-			pctx->window_bytes[pctx->window_head] = pctx->io_byte_total;
-			pctx->window_seconds[pctx->window_head] = (int)pctx->session_seconds;
-			if (pctx->window_size < 4) pctx->window_size++;
+			pctx.window_head = (pctx.window_head + 1) % 4;
+			pctx.window_bytes[pctx.window_head] = pctx.io_byte_total;
+			pctx.window_seconds[pctx.window_head] = pctx.session_seconds;
+			if (pctx.window_size < 4) pctx.window_size++;
 
-			int oldest_idx = (pctx->window_head - pctx->window_size + 1 + 4) % 4;
-			int64_t delta_bytes = pctx->window_bytes[pctx->window_head] - pctx->window_bytes[oldest_idx];
-			int64_t delta_secs = (int64_t)(pctx->window_seconds[pctx->window_head] - pctx->window_seconds[oldest_idx]);
+			int oldest_idx = (pctx.window_head - pctx.window_size + 1 + 4) % 4;
+			int64_t delta_bytes = pctx.window_bytes[pctx.window_head] - pctx.window_bytes[oldest_idx];
+			int64_t delta_secs = pctx.window_seconds[pctx.window_head] - pctx.window_seconds[oldest_idx];
 			int64_t window_bps = (delta_secs > 0) ? (delta_bytes / delta_secs) : 0;
 			int64_t window_mib = window_bps / 1048576;
 
-			int64_t global_bps = (pctx->session_seconds > 0) ? (pctx->io_byte_total / pctx->session_seconds) : 0;
+			int64_t global_bps = (pctx.session_seconds > 0) ? (pctx.io_byte_total / pctx.session_seconds) : 0;
 			int64_t global_mib = global_bps / 1048576;
 
 			char freed_str[32], total_io_str[32];
-			format_bytes_scaled(pctx->bytes_merged_away, freed_str, sizeof(freed_str));
-			format_bytes_scaled(pctx->io_byte_total, total_io_str, sizeof(total_io_str));
+			format_bytes_scaled(pctx.bytes_merged_away, freed_str, sizeof(freed_str));
+			format_bytes_scaled(pctx.io_byte_total, total_io_str, sizeof(total_io_str));
 
 			int int_pct = (int)(((size - remain) * 100) / size);
 
-			if (stdout_tty == 1) printf("\r");
-			printf("zeromerge: %ld merged, %s/%s freed (%" PRId64 " MiB/sec). Current merge: %d%% done (%" PRId64 " MiB/sec)",
-					pctx->merged_count, freed_str, total_io_str, global_mib, int_pct, window_mib);
-			if (stdout_tty == 0) printf("\n");
-			fflush(stdout);
+			if (stdout_tty == 1) fprintf(stderr, "\r");
+			fprintf(stderr, "%ld merged, %ld rejected, %s/%s freed (%" PRId64 " MiB/s). This merge: %d%% (%" PRId64 " MiB/s)     ",
+					pctx.merged_count, pctx.rejected_count, freed_str, total_io_str, global_mib, int_pct, window_mib);
+			if (stdout_tty == 0) fprintf(stderr, "\n");
+			fflush(stderr);
 		}
 	}
 	retval = 0;
@@ -150,7 +193,7 @@ struct file_entry {
 	char *path;
 	int64_t size;
 	uint64_t ino;
-	uint32_t dev;
+	uint64_t dev;
 	uint32_t mode;
 	struct file_entry *next;
 #ifndef ON_WINDOWS
@@ -170,7 +213,7 @@ static int compare_file_entries(const void *a, const void *b)
 }
 
 
-/* Helper to collect files recursively */
+/* Collect files recursively with scan progress and minimum size filter */
 static struct file_entry *collect_files(const char *path, struct file_entry *head)
 {
 	JC_DIR *dir;
@@ -181,7 +224,17 @@ static struct file_entry *collect_files(const char *path, struct file_entry *hea
 	if (jc_stat(path, &st) != 0) return head;
 	if (strstr(path, "__zeromerge__.tmp") != NULL) return head;
 
+	if (quiet == 0 && jc_alarm_ring != 0) {
+		jc_alarm_ring = 0;
+		if (stdout_tty == 1) fprintf(stderr, "\r");
+		fprintf(stderr, "zeromerge: scanning... %" PRId64 " entries checked, %" PRId64 " files queued",
+				pctx.scanned_entries, pctx.candidate_files);
+		if (stdout_tty == 0) fprintf(stderr, "\n");
+		fflush(stderr);
+	}
+
 	if (JC_S_ISDIR(st.st_mode)) {
+		pctx.scanned_entries++;
 		dir = jc_opendir(path);
 		if (!dir) return head;
 		while ((entry = jc_readdir(dir)) != NULL) {
@@ -191,7 +244,8 @@ static struct file_entry *collect_files(const char *path, struct file_entry *hea
 		}
 		jc_closedir(dir);
 	} else if (JC_S_ISREG(st.st_mode)) {
-		if (st.st_size <= 0) return head;
+		pctx.scanned_entries++;
+		if (st.st_size <= 0 || st.st_size < min_size) return head;
 		struct file_entry *fe = (struct file_entry *)malloc(sizeof(struct file_entry));
 		if (!fe) jc_oom("collect_files entry");
 		fe->path = strdup(path);
@@ -206,43 +260,57 @@ static struct file_entry *collect_files(const char *path, struct file_entry *hea
 		fe->mode = st.st_mode;
 		fe->next = head;
 		head = fe;
+		pctx.candidate_files++;
 	}
 	return head;
 }
 
 
-/* Recursive batch merge handler (-r) with unified cleanup and advanced progress */
-static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty, int quiet_mode)
+/* Recursive batch merge handler (-r) */
+static int run_recursive_merge(int argc, char **argv, int optind)
 {
 	struct file_entry *head = NULL, *curr, *nxt;
-	int count = 0, i, retval = 0;
+	size_t count = 0, i;
+	int retval = 0;
 	struct file_entry **arr = NULL;
-	struct progress_context pctx;
 
 	memset(&pctx, 0, sizeof(pctx));
 
-	if (optind >= argc) head = collect_files(".", NULL);
-	else for (i = optind; i < argc; i++) head = collect_files(argv[i], head);
-
-	for (curr = head; curr != NULL; curr = curr->next) count++;
-	if (count < 2) {
-		fprintf(stderr, "Not enough files found for merging.\n");
-		goto cleanup;
-	}
-
-	arr = (struct file_entry **)malloc(sizeof(struct file_entry *) * (size_t)count);
-	if (!arr) jc_oom("recursive merge array");
-	i = 0;
-	for (curr = head; curr != NULL; curr = curr->next) arr[i++] = curr;
-
-	qsort(arr, (size_t)count, sizeof(struct file_entry *), compare_file_entries);
-
-	if (!quiet_mode) {
+	if (quiet == 0) {
 		jc_start_alarm(1, 1);
 		jc_alarm_ring = 1;
 	}
 
-	for (i = 0; i < count - 1; i++) {
+	if (optind >= argc) head = collect_files(".", NULL);
+	else for (int a = optind; a < argc; a++) head = collect_files(argv[a], head);
+
+	if (quiet == 0) {
+		jc_stop_alarm();
+		if (stdout_tty == 1) fprintf(stderr, "\r");
+		fprintf(stderr, "zeromerge: scan complete (%" PRId64 " files queued).                                                 ", pctx.candidate_files);
+		if (stdout_tty == 0) fprintf(stderr, "\n");
+		fflush(stderr);
+	}
+
+	for (curr = head; curr != NULL; curr = curr->next) count++;
+	if (count < 2) {
+		fprintf(stderr, "\nNot enough files found for merging.\n");
+		goto cleanup;
+	}
+
+	arr = (struct file_entry **)malloc(sizeof(struct file_entry *) * count);
+	if (!arr) jc_oom("recursive merge array");
+	i = 0;
+	for (curr = head; curr != NULL; curr = curr->next) arr[i++] = curr;
+
+	qsort(arr, count, sizeof(struct file_entry *), compare_file_entries);
+
+	if (quiet == 0) {
+		jc_start_alarm(1, 1);
+		jc_alarm_ring = 1;
+	}
+
+	for (i = 0; i + 1 < count; i++) {
 		if (arr[i]->size == arr[i+1]->size) {
 			struct file_entry *f1 = arr[i];
 			struct file_entry *f2 = arr[i+1];
@@ -251,6 +319,17 @@ static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty
 			int mres;
 
 			if (f1->dev == f2->dev && f1->ino == f2->ino) continue;
+
+			if (quiet == 0) {
+				if (stdout_tty == 1) fprintf(stderr, "\r");
+				fprintf(stderr, "zeromerge: merging ");
+				jc_fwprint(stderr, f1->path, 0);
+				fprintf(stderr, " + ");
+				jc_fwprint(stderr, f2->path, 0);
+				fprintf(stderr, "                                        ");
+				if (stdout_tty == 0) fprintf(stderr, "\n");
+				fflush(stderr);
+			}
 
 			snprintf(tmpname, sizeof(tmpname), "%s.__zeromerge__.tmp", f1->path);
 			jc_remove(tmpname);
@@ -264,10 +343,12 @@ static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty
 				if (sf2) jc_fclose(sf2);
 				if (sout) jc_fclose(sout);
 				jc_remove(tmpname);
+				pctx.rejected_count++;
+				fprintf(stderr, "\nzeromerge: merge aborted: failed to open input or temporary file\n");
 				continue;
 			}
 
-			mres = execute_merge(sf1, sf2, sout, f1->size, active_readsize, &pctx, stdout_tty, quiet_mode);
+			mres = execute_merge(sf1, sf2, sout, f1->size, active_readsize);
 			jc_fclose(sf1);
 			jc_fclose(sf2);
 			jc_fclose(sout);
@@ -279,6 +360,10 @@ static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty
 					jc_remove(f1->path);
 					jc_remove(f2->path);
 					if (jc_link(tmpname, f1->path) == 0 && jc_link(tmpname, f2->path) == 0) success = 1;
+					else {
+						pctx.rejected_count++;
+						fprintf(stderr, "\nzeromerge: merge aborted: hard link failed\n");
+					}
 				} else {
 					FILE *tsrc = jc_fopen(tmpname, JC_FILE_MODE_RDONLY_SEQ);
 					FILE *tdest1 = jc_fopen(f1->path, JC_FILE_MODE_WRONLY_SEQ);
@@ -294,6 +379,13 @@ static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty
 							}
 						}
 						if (copy_ok) success = 1;
+						else {
+							pctx.rejected_count++;
+							fprintf(stderr, "\nzeromerge: merge aborted: write error while updating files\n");
+						}
+					} else {
+						pctx.rejected_count++;
+						fprintf(stderr, "\nzeromerge: merge aborted: failed to reopen merged output for copy\n");
 					}
 					if (tsrc) jc_fclose(tsrc);
 					if (tdest1) jc_fclose(tdest1);
@@ -315,16 +407,32 @@ static int run_recursive_merge(int argc, char **argv, int optind, int stdout_tty
 						f2->ino = st_new.st_ino;
 						f2->dev = st_new.st_dev;
 					}
+
+					if (quiet == 0) {
+						if (stdout_tty == 1) fprintf(stderr, "\r");
+						fprintf(stderr, "zeromerge: merge complete.                                                      ");
+						if (stdout_tty == 0) fprintf(stderr, "\n");
+						fflush(stderr);
+					}
 				}
+			} else if (mres == -2) {
+				pctx.rejected_count++;
+				fprintf(stderr, "\nzeromerge: merge aborted: file contents are different\n");
+			} else {
+				pctx.rejected_count++;
+				fprintf(stderr, "\nzeromerge: merge aborted: read or write error during merge\n");
 			}
 			jc_remove(tmpname);
 		}
 	}
 
-	if (!quiet_mode) {
+	if (quiet == 0) {
 		jc_stop_alarm();
-		if (stdout_tty == 1) printf("\r");
-		printf("zeromerge: %ld merged successfully.                                           \n", pctx.merged_count);
+		if (stdout_tty == 1) fprintf(stderr, "\r");
+		fprintf(stderr, "zeromerge: %ld merged successfully, %ld rejected.                                 ",
+				pctx.merged_count, pctx.rejected_count);
+		if (stdout_tty == 0) fprintf(stderr, "\n");
+		fflush(stderr);
 	}
 
 cleanup:
@@ -352,9 +460,7 @@ int main(int argc, char **argv)
 	size_t read1, read2, written, idx;
 	int32_t err1 = 0, err2 = 0, err3 = 0;
 	int seconds = 0;
-	int stdout_tty = 0;
 	int hide_progress = 0;
-	int quiet_mode = 0;
 	const char *prog_suffix = "B";
 	int prog_shift = 0;
 	int64_t processed = 0;
@@ -390,7 +496,7 @@ int main(int argc, char **argv)
 			recursive_mode = 1;
 			arg_index++;
 		} else if (!jc_streq(argv[arg_index], "-q") || !jc_streq(argv[arg_index], "--quiet")) {
-			quiet_mode = 1;
+			quiet = 1;
 			hide_progress = 1;
 			arg_index++;
 		} else if (!jc_streq(argv[arg_index], "-C")) {
@@ -406,10 +512,20 @@ int main(int argc, char **argv)
 			}
 			active_readsize = (size_t)4096 << val;
 			arg_index += 2;
+		} else if (!jc_streq(argv[arg_index], "-s")) {
+			if (arg_index + 1 >= argc) {
+				fprintf(stderr, "Error: -s requires a size argument\n");
+				exit(EXIT_FAILURE);
+			}
+			if (parse_min_size(argv[arg_index + 1], &min_size) != 0) {
+				fprintf(stderr, "Error: invalid minimum size '%s'\n", argv[arg_index + 1]);
+				exit(EXIT_FAILURE);
+			}
+			arg_index += 2;
 		} else break;
 	}
 
-	if (recursive_mode) return run_recursive_merge(argc, argv, arg_index, stdout_tty, quiet_mode);
+	if (recursive_mode) return run_recursive_merge(argc, argv, arg_index);
 
 	if (argc - arg_index != 3) goto error_argcount;
 
@@ -482,16 +598,16 @@ int main(int argc, char **argv)
 			seconds += jc_alarm_ring;
 			jc_alarm_ring = 0;
 			progress = stat1.st_size - remain;
-			if (stdout_tty == 1) printf("\r");
-			printf("[zeromerge] Progress: %" PRId64 "%%, %" PRId64 " of %" PRId64 " %s (%" PRId64 " %s/sec)",
+			if (stdout_tty == 1) fprintf(stderr, "\r");
+			fprintf(stderr, "[zeromerge] Progress: %" PRId64 "%%, %" PRId64 " of %" PRId64 " %s (%" PRId64 " %s/sec)",
 					(progress * 100) / stat1.st_size,
 					progress >> prog_shift,
 					stat1.st_size >> prog_shift,
 					prog_suffix,
 					(seconds > 0) ? (processed / seconds) >> prog_shift : 0,
 					prog_suffix);
-			if (stdout_tty == 0) printf("\n");
-			fflush(stdout);
+			if (stdout_tty == 0) fprintf(stderr, "\n");
+			fflush(stderr);
 		}
 		if (jc_feof(fp1) && jc_feof(fp2)) break;
 	}
@@ -500,10 +616,11 @@ int main(int argc, char **argv)
 
 	if (hide_progress == 0) {
 		jc_stop_alarm();
-		if (stdout_tty == 1) printf("\r");
-		printf("[zeromerge] merge complete.");
-		if (stdout_tty == 0) printf("\n");
-		else printf("                                            \n");
+		if (stdout_tty == 1) fprintf(stderr, "\r");
+		fprintf(stderr, "[zeromerge] merge complete.");
+		if (stdout_tty == 0) fprintf(stderr, "\n");
+		else fprintf(stderr, "                                            \n");
+		fflush(stderr);
 	}
 	exit(EXIT_SUCCESS);
 

@@ -39,6 +39,7 @@ struct progress_context {
 };
 
 static FILE *fp1, *fp2, *fp3;
+static char *buf1 = NULL, *buf2 = NULL;
 static size_t active_readsize = DEFAULT_READSIZE;
 static int64_t min_size = 0;
 static int stdout_tty = 0;
@@ -51,6 +52,10 @@ void clean_exit(void)
 	if (fp1) jc_fclose(fp1);
 	if (fp2) jc_fclose(fp2);
 	if (fp3) jc_fclose(fp3);
+	ALIGNED_FREE(buf1);
+	ALIGNED_FREE(buf2);
+	buf1 = NULL;
+	buf2 = NULL;
 	return;
 }
 
@@ -113,37 +118,28 @@ static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 /* Core merge execution between two open files into a third open file */
 static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size, size_t readsize)
 {
-	char *buf1 = NULL, *buf2 = NULL;
 	int64_t remain = size;
 	size_t read1, read2, written, idx;
-	int retval = -1;
-
-	buf1 = (char *)aligned_alloc(32, readsize);
-	buf2 = (char *)aligned_alloc(32, readsize);
-	if (!buf1 || !buf2) jc_oom("execute_merge() buffer allocation");
 
 	while (remain > 0) {
 		size_t to_read = (remain < (int64_t)readsize) ? (size_t)remain : readsize;
 
 		read1 = jc_fread(buf1, 1, to_read, source1);
-		if (jc_ferror(source1)) goto cleanup;
+		if (jc_ferror(source1)) return -1;
 
 		read2 = jc_fread(buf2, 1, to_read, source2);
-		if (jc_ferror(source2)) goto cleanup;
+		if (jc_ferror(source2)) return -1;
 
-		if (read1 != read2) goto cleanup;
+		if (read1 != read2) return -1;
 		if (read2 == 0) break;
 
 		for (idx = 0; idx < read2; idx++) {
-			if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0) {
-				retval = -2;
-				goto cleanup;
-			}
+			if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0) return -2;
 			buf1[idx] |= buf2[idx];
 		}
 
 		written = jc_fwrite(buf1, 1, read2, dest);
-		if (written != read2 || jc_ferror(dest)) goto cleanup;
+		if (written != read2 || jc_ferror(dest)) return -1;
 
 		remain -= (int64_t)read2;
 		pctx.io_byte_total += (int64_t)read2;
@@ -179,12 +175,7 @@ static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size,
 			fflush(stderr);
 		}
 	}
-	retval = 0;
-
-cleanup:
-	ALIGNED_FREE(buf1);
-	ALIGNED_FREE(buf2);
-	return retval;
+	return 0;
 }
 
 
@@ -344,7 +335,9 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 				if (sout) jc_fclose(sout);
 				jc_remove(tmpname);
 				pctx.rejected_count++;
-				fprintf(stderr, "\nzeromerge: merge aborted: failed to open input or temporary file\n");
+				if (stdout_tty == 1) fprintf(stderr, "\r");
+				fprintf(stderr, "zeromerge: merge aborted: failed to open input or temporary file            \n");
+				fflush(stderr);
 				continue;
 			}
 
@@ -362,18 +355,19 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 					if (jc_link(tmpname, f1->path) == 0 && jc_link(tmpname, f2->path) == 0) success = 1;
 					else {
 						pctx.rejected_count++;
-						fprintf(stderr, "\nzeromerge: merge aborted: hard link failed\n");
+						if (stdout_tty == 1) fprintf(stderr, "\r");
+						fprintf(stderr, "zeromerge: merge aborted: hard link failed                                \n");
+						fflush(stderr);
 					}
 				} else {
 					FILE *tsrc = jc_fopen(tmpname, JC_FILE_MODE_RDONLY_SEQ);
 					FILE *tdest1 = jc_fopen(f1->path, JC_FILE_MODE_WRONLY_SEQ);
 					FILE *tdest2 = jc_fopen(f2->path, JC_FILE_MODE_WRONLY_SEQ);
 					if (tsrc && tdest1 && tdest2) {
-						char copybuf[32768];
 						size_t r;
 						int copy_ok = 1;
-						while ((r = jc_fread(copybuf, 1, sizeof(copybuf), tsrc)) > 0) {
-							if (jc_fwrite(copybuf, 1, r, tdest1) != r || jc_fwrite(copybuf, 1, r, tdest2) != r) {
+						while ((r = jc_fread(buf1, 1, active_readsize, tsrc)) > 0) {
+							if (jc_fwrite(buf1, 1, r, tdest1) != r || jc_fwrite(buf1, 1, r, tdest2) != r) {
 								copy_ok = 0;
 								break;
 							}
@@ -381,11 +375,15 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 						if (copy_ok) success = 1;
 						else {
 							pctx.rejected_count++;
-							fprintf(stderr, "\nzeromerge: merge aborted: write error while updating files\n");
+							if (stdout_tty == 1) fprintf(stderr, "\r");
+							fprintf(stderr, "zeromerge: merge aborted: write error while updating files            \n");
+							fflush(stderr);
 						}
 					} else {
 						pctx.rejected_count++;
-						fprintf(stderr, "\nzeromerge: merge aborted: failed to reopen merged output for copy\n");
+						if (stdout_tty == 1) fprintf(stderr, "\r");
+						fprintf(stderr, "zeromerge: merge aborted: failed to reopen merged output for copy       \n");
+						fflush(stderr);
 					}
 					if (tsrc) jc_fclose(tsrc);
 					if (tdest1) jc_fclose(tdest1);
@@ -417,10 +415,14 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 				}
 			} else if (mres == -2) {
 				pctx.rejected_count++;
-				fprintf(stderr, "\nzeromerge: merge aborted: file contents are different\n");
+				if (stdout_tty == 1) fprintf(stderr, "\r");
+				fprintf(stderr, "zeromerge: merge aborted: file contents are different                    \n");
+				fflush(stderr);
 			} else {
 				pctx.rejected_count++;
-				fprintf(stderr, "\nzeromerge: merge aborted: read or write error during merge\n");
+				if (stdout_tty == 1) fprintf(stderr, "\r");
+				fprintf(stderr, "zeromerge: merge aborted: read or write error during merge                \n");
+				fflush(stderr);
 			}
 			jc_remove(tmpname);
 		}
@@ -525,6 +527,10 @@ int main(int argc, char **argv)
 		} else break;
 	}
 
+	buf1 = (char *)aligned_alloc(32, active_readsize);
+	buf2 = (char *)aligned_alloc(32, active_readsize);
+	if (!buf1 || !buf2) jc_oom("main() buffer allocation");
+
 	if (recursive_mode) return run_recursive_merge(argc, argv, arg_index);
 
 	if (argc - arg_index != 3) goto error_argcount;
@@ -556,10 +562,6 @@ int main(int argc, char **argv)
 
 	fp3 = jc_fopen(file3, JC_FILE_MODE_WRONLY_SEQ);
 	if (!fp3) goto error_file3;
-
-	char *buf1 = (char *)aligned_alloc(32, active_readsize);
-	char *buf2 = (char *)aligned_alloc(32, active_readsize);
-	if (!buf1 || !buf2) jc_oom("main() buffer allocation");
 
 	if (hide_progress == 0) {
 		jc_start_alarm(1, 1);
@@ -611,8 +613,6 @@ int main(int argc, char **argv)
 		}
 		if (jc_feof(fp1) && jc_feof(fp2)) break;
 	}
-	ALIGNED_FREE(buf1);
-	ALIGNED_FREE(buf2);
 
 	if (hide_progress == 0) {
 		jc_stop_alarm();

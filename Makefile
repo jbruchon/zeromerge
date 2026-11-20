@@ -92,7 +92,6 @@ else
  LIB_EXT=.a
 endif
 
-
 ### Find and use nearby libjodycode by default
 ifndef IGNORE_NEARBY_JC
  ifneq ("$(wildcard ../libjodycode/libjodycode.h)","")
@@ -110,12 +109,27 @@ ifndef IGNORE_NEARBY_JC
  endif
 endif
 
+### Get machine information and check for x86
+UNAME_M := $(shell uname -m 2>/dev/null)
+IS_X86 := 0
+ifndef NO_SIMD
+ ifneq (,$(filter x86_64 amd64 i386 i486 i586 i686,$(UNAME_M)))
+  IS_X86 := 1
+ endif
+endif
+
+ifeq ($(IS_X86),1)
+ ifndef NO_SIMD
+  OBJS += zeromerge_simd.o zeromerge_simd_sse2.o zeromerge_simd_avx2.o zeromerge_simd_avx512.o
+ endif
+else
+ COMPILER_OPTIONS += -DNO_SIMD
+endif
 
 CFLAGS += $(COMPILER_OPTIONS) $(CFLAGS_EXTRA)
 LDFLAGS += $(LINK_OPTIONS) $(LDFLAGS_EXTRA)
 
 OBJS += libjodycode_check.o zeromerge.o helptext.o
-
 
 all: libjodycode_hint $(PROGRAM_NAME) dynamic_jc
 
@@ -133,6 +147,18 @@ static_stripped: $(PROGRAM_NAME) static
 
 $(PROGRAM_NAME): $(OBJS)
 	:
+
+zeromerge_simd.o: zeromerge_simd.c zeromerge_simd.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+zeromerge_simd_sse2.o: zeromerge_simd_sse2.c zeromerge_simd.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) -msse2 -c $< -o $@
+
+zeromerge_simd_avx2.o: zeromerge_simd_avx2.c zeromerge_simd.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) -mavx2 -c $< -o $@
+
+zeromerge_simd_avx512.o: zeromerge_simd_avx512.c zeromerge_simd.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) -mavx512f -mavx512bw -c $< -o $@
 
 winres.o: winres.rc winres.manifest.xml
 	./tune_winres.sh

@@ -44,6 +44,9 @@ static size_t active_readsize = DEFAULT_READSIZE;
 static int64_t min_size = 0;
 static int stdout_tty = 0;
 static int quiet = 0;
+#if !defined NO_SIMD && ZEROMERGE_ARCH_X86
+static int simd_mode = ZM_SIMD_NONE;
+#endif
 static struct progress_context pctx;
 
 static const char *abort_open_err = "failed to open input or temporary file";
@@ -68,11 +71,26 @@ void clean_exit(void)
 	if (fp1) jc_fclose(fp1);
 	if (fp2) jc_fclose(fp2);
 	if (fp3) jc_fclose(fp3);
-	ALIGNED_FREE(buf1);
-	ALIGNED_FREE(buf2);
+	ZM_ALIGNED_FREE(buf1);
+	ZM_ALIGNED_FREE(buf2);
 	buf1 = NULL;
 	buf2 = NULL;
 	return;
+}
+
+
+/* Merge two loaded buffers; 0 = merged ok, -2 = non-zero conflict */
+static int merge_buffers(size_t length)
+{
+#if !defined NO_SIMD && ZEROMERGE_ARCH_X86
+	return zeromerge_merge_bufs(simd_mode, length, buf1, buf2);
+#else
+	for (size_t idx = 0; idx < length; idx++) {
+		if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0) return -2;
+		buf1[idx] |= buf2[idx];
+	}
+	return 0;
+#endif
 }
 
 
@@ -135,7 +153,7 @@ static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size, size_t readsize)
 {
 	int64_t remain = size;
-	size_t read1, read2, written, idx;
+	size_t read1, read2, written;
 
 	while (remain > 0) {
 		size_t to_read = (remain < (int64_t)readsize) ? (size_t)remain : readsize;
@@ -149,10 +167,7 @@ static int execute_merge(FILE *source1, FILE *source2, FILE *dest, int64_t size,
 		if (read1 != read2) return -1;
 		if (read2 == 0) break;
 
-		for (idx = 0; idx < read2; idx++) {
-			if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0) return -2;
-			buf1[idx] |= buf2[idx];
-		}
+		if (merge_buffers(read2) != 0) return -2;
 
 		written = jc_fwrite(buf1, 1, read2, dest);
 		if (written != read2 || jc_ferror(dest)) return -1;
@@ -453,7 +468,7 @@ int main(int argc, char **argv)
 	const char *file1, *file2, *file3;
 	struct JC_STAT stat1, stat2;
 	int64_t remain, progress;
-	size_t read1, read2, written, idx;
+	size_t read1, read2, written;
 	int32_t err1 = 0, err2 = 0, err3 = 0;
 	int seconds = 0;
 	int hide_progress = 0;
@@ -477,6 +492,10 @@ int main(int argc, char **argv)
 #endif
 
 	set_program_name(argv[0]);
+
+#if !defined NO_SIMD && ZEROMERGE_ARCH_X86
+	simd_mode = zeromerge_detect_simd();
+#endif
 
 	/* Parse command-line options */
 	while (arg_index < argc) {
@@ -521,8 +540,8 @@ int main(int argc, char **argv)
 		} else break;
 	}
 
-	buf1 = (char *)aligned_alloc(32, active_readsize);
-	buf2 = (char *)aligned_alloc(32, active_readsize);
+	buf1 = (char *)ZM_ALIGNED_ALLOC(32, active_readsize);
+	buf2 = (char *)ZM_ALIGNED_ALLOC(32, active_readsize);
 	if (!buf1 || !buf2) jc_oom("main() buffer allocation");
 
 	if (recursive_mode) return run_recursive_merge(argc, argv, arg_index);
@@ -576,11 +595,7 @@ int main(int argc, char **argv)
 		if (read1 != read2) goto error_short_read;
 		if (read2 == 0) break;
 
-		idx = 0;
-		for (; idx < read2; idx++) {
-			if (buf1[idx] != buf2[idx] && buf1[idx] != 0 && buf2[idx] != 0) goto error_different;
-			buf1[idx] |= buf2[idx];
-		}
+		if (merge_buffers(read2) != 0) goto error_different;
 
 		written = jc_fwrite(buf1, 1, read2, fp3);
 		if (written != read2 || jc_ferror(fp3)) {

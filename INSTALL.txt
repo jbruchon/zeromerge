@@ -56,6 +56,7 @@ Certain options can be turned on by setting a variable passed to make instead
 of using CFLAGS_EXTRA, i.e. 'make DEBUG=1':
 
 NO_UNICODE             [Windows only] disable all Unicode support
+NO_SIMD                Do not compile in any SIMD code (SSE/AVX)
 DEBUG                  Turn on algorithm statistic reporting with '-D'
 LOUD                   '-@' for low-level debugging; enables DEBUG
 GC_SECTIONS            Use gcc/ld section garbage collection to reduce size

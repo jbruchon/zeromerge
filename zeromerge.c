@@ -440,7 +440,7 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 	if (quiet == 0) {
 		jc_stop_alarm();
 		if (stdout_tty == 1) fprintf(stderr, "\r");
-		fprintf(stderr, "zeromerge: %ld merged successfully, %ld rejected.                                 ",
+		fprintf(stderr, "zeromerge: %ld merged successfully, %ld rejected.                                 \n",
 				pctx.merged_count, pctx.rejected_count);
 		if (stdout_tty == 0) fprintf(stderr, "\n");
 		fflush(stderr);

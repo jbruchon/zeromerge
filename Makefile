@@ -180,7 +180,7 @@ uninstall: uninstalldirs
 test: zeromerge
 	./test.sh
 
-stripped: $(PROGRAM_NAME)
+stripped: $(PROGRAM_NAME) all
 	strip $(PROGRAM_NAME)$(SUFFIX)
 
 clean:

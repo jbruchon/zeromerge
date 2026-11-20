@@ -67,7 +67,7 @@ if [ -d "../libjodycode" ]
 	cd "$WD"
 fi
 E1=1; E2=0; E3=0
-make clean && make -j$PM static_jc stripped && cp $NAME$EXT $PKGNAME/$NAME$EXT && E1=0
+make clean && make -j$PM static_jc static_stripped && cp $NAME$EXT $PKGNAME/$NAME$EXT && E1=0
 make clean
 test $((E1 + E2 + E3)) -gt 0 && echo "Error building packages; aborting." && exit 1
 # Make a fat binary on macOS x86_64 if possible

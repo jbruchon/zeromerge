@@ -6,7 +6,7 @@ If you find this software useful, please consider donating to support its contin
 
 ## Assumptions & Responsibility
 
-`zeromerge` assumes `0x00` means empty or missing data—as produced by tools that pre-allocate zeroed files or zero-fill unallocated regions and unreadable sectors. **It is the user's responsibility not to point `zeromerge` at files that are not zero-sparse.** Merging arbitrary files where `0x00` has non-sparse semantics or where two files differ in non-zero data can produce unintended results or abort on conflict.
+`zeromerge` assumes `0x00` means empty or missing data--as produced by tools that pre-allocate zeroed files or zero-fill unallocated regions and unreadable sectors. **It is the user's responsibility not to point `zeromerge` at files that are not zero-sparse.** Merging arbitrary files where `0x00` has non-sparse semantics or where two files differ in non-zero data can produce unintended results or abort on conflict.
 
 ## Use Cases
 
@@ -31,7 +31,9 @@ Merges two non-empty, non-hard-linked regular files of identical size into `<out
 zeromerge -r [options] [path ...]
 ```
 
-Recursively scans directories (defaulting to `.`), filters by size if `-s` is given, sorts files by size, and merges adjacent same-sized files via a temporary file—hard-linking on the same filesystem or copying across filesystems, and preserving permissions/ownership where supported.
+Recursively scans directories (defaulting to `.`), filters by size if `-s` is given, sorts files by size, and merges adjacent same-sized files via a temporary file, hard-linking on the same filesystem or copying across filesystems, and preserving permissions/ownership where supported.
+
+Note that the progress indicator for recursive merging shows the merge rate, not the total data throughput. Example: if the progress shows `This merge: 94% (310 MiB/s)`, the 310 MiB/second figure covers the source file reads, but the merged data written after each input block is processed is left out, so the raw data rate is typically around 1.5x, or 465 MiB/second for this example.
 
 ## Options
 
@@ -44,7 +46,7 @@ Recursively scans directories (defaulting to `.`), filters by size if `-s` is gi
 
 ## Building & SIMD
 
-Build with `make` (requires `libjodycode`). On `x86_64` and `i686`, runtime detection selects SSE2, AVX2, or AVX-512 for buffer merging when supported, falling back to scalar code otherwise or when `NO_SIMD` / non-x86 targets are built.
+Build with `make` (requires `libjodycode`). On `x86_64` and `i686`, runtime detection selects SSE2, AVX2, or AVX-512 for buffer merging when supported, falling back to scalar code otherwise or when `NO_SIMD` / non-x86 targets are built. See INSTALL.txt for more information.
 
 ## License
 

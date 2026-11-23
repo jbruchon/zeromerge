@@ -343,13 +343,11 @@ static int run_recursive_merge(int argc, char **argv, int optind)
 			if (f1->dev == f2->dev && f1->ino == f2->ino) continue;
 
 			if (quiet == 0) {
-				if (stdout_tty == 1) fprintf(stderr, "\r");
+				if (stdout_tty == 1) fprintf(stderr, "\r                                                                              \r");
 				fprintf(stderr, "zeromerge: merging ");
 				jc_fwprint(stderr, f1->path, 0);
 				fprintf(stderr, " + ");
-				jc_fwprint(stderr, f2->path, 0);
-				fprintf(stderr, "                                        ");
-				if (stdout_tty == 0) fprintf(stderr, "\n");
+				jc_fwprint(stderr, f2->path, 1);
 				fflush(stderr);
 			}
 

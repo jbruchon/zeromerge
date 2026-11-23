@@ -15,16 +15,16 @@ zeroed blocks in both files will remain zeroed in the output file.
 
 .SH OPTIONS
 .TP
+.B \-r
+Recursively scan paths, group files by size, merge matches, and link/copy.
+.TP
 .B \-C ##
 Set I/O chunk size index (0 = 4K, doubles up to 18 = 1GB; default 12 = 16MB).
 .TP
 .BI \-s " SIZE[suffix]"
 Minimum file size to consider in recursive (\-r) mode; supports bytes or K/M/G/T[i]B suffixes.
 .TP
-.B \-r, \-\-recursive
-Recursively scan paths, group files by size, merge matches, and link/copy.
-.TP
-.B \-q, \-\-quiet
+.B \-q
 Suppress all progress and completion output.
 .TP
 .B \-h, \-\-help

@@ -94,43 +94,6 @@ static int merge_buffers(size_t length)
 }
 
 
-/* Parse minimum size argument with optional suffix */
-static int parse_min_size(const char *arg, int64_t *out_size)
-{
-	char *endptr = NULL;
-	unsigned long long val;
-	uint64_t mult = 1;
-
-	if (!arg || *arg == '\0' || *arg == '-') return -1;
-	errno = 0;
-	val = strtoull(arg, &endptr, 10);
-	if (errno != 0 || endptr == arg) return -1;
-
-	if (*endptr != '\0') {
-		int matched = 0;
-		for (int i = 0; jc_size_suffix[i].suffix != NULL; i++) {
-			if (!jc_streq(endptr, jc_size_suffix[i].suffix)) {
-				mult = (uint64_t)jc_size_suffix[i].multiplier;
-				matched = 1;
-				break;
-			}
-		}
-		if (!matched && endptr[1] == '\0') {
-			if (endptr[0] == 'b' || endptr[0] == 'B') { mult = 1ULL; matched = 1; }
-			else if (endptr[0] == 'k' || endptr[0] == 'K') { mult = 1ULL << 10; matched = 1; }
-			else if (endptr[0] == 'm' || endptr[0] == 'M') { mult = 1ULL << 20; matched = 1; }
-			else if (endptr[0] == 'g' || endptr[0] == 'G') { mult = 1ULL << 30; matched = 1; }
-			else if (endptr[0] == 't' || endptr[0] == 'T') { mult = 1ULL << 40; matched = 1; }
-		}
-		if (!matched) return -1;
-	}
-
-	if (mult > 0 && val > (uint64_t)INT64_MAX / mult) return -1;
-	*out_size = (int64_t)(val * mult);
-	return 0;
-}
-
-
 /* Format bytes using libjodycode size suffixes */
 static void format_bytes_scaled(int64_t bytes, char *outbuf, size_t outlen)
 {
@@ -505,20 +468,20 @@ int main(int argc, char **argv)
 			version();
 			exit(EXIT_SUCCESS);
 		}
-		if (!jc_streq(argv[arg_index], "-r") || !jc_streq(argv[arg_index], "--recursive")) {
+		if (!jc_streq(argv[arg_index], "-r")) {
 			recursive_mode = 1;
 			arg_index++;
-		} else if (!jc_streq(argv[arg_index], "-q") || !jc_streq(argv[arg_index], "--quiet")) {
+		} else if (!jc_streq(argv[arg_index], "-q")) {
 			quiet = 1;
 			hide_progress = 1;
 			arg_index++;
-		} else if (!jc_streq(argv[arg_index], "-C")) {
+		} else if (!jc_streq(argv[arg_index], "-C")
+			char *endptr = NULL;
+			long val = jc_strtol(argv[arg_index + 1], &endptr, 10);
 			if (arg_index + 1 >= argc) {
 				fprintf(stderr, "Error: -C requires a numeric argument (0-18)\n");
 				exit(EXIT_FAILURE);
 			}
-			char *endptr = NULL;
-			long val = strtol(argv[arg_index + 1], &endptr, 10);
 			if (*endptr != '\0' || val < 0 || val > 18) {
 				fprintf(stderr, "Error: invalid chunk size index '%s' (must be 0-18)\n", argv[arg_index + 1]);
 				exit(EXIT_FAILURE);
@@ -526,14 +489,24 @@ int main(int argc, char **argv)
 			active_readsize = (size_t)4096 << val;
 			arg_index += 2;
 		} else if (!jc_streq(argv[arg_index], "-s")) {
+			const struct jc_size_suffix *ss = jc_size_suffix;
+			char *p;
 			if (arg_index + 1 >= argc) {
 				fprintf(stderr, "Error: -s requires a size argument\n");
 				exit(EXIT_FAILURE);
 			}
-			if (parse_min_size(argv[arg_index + 1], &min_size) != 0) {
-				fprintf(stderr, "Error: invalid minimum size '%s'\n", argv[arg_index + 1]);
-				exit(EXIT_FAILURE);
+			p = argv[arg_index + 1];
+			if (*p < '0' || *p > '9') goto error_bad_size_suffix;
+			jc_errno = 0;
+			min_size = jc_strtoll(p, &p, 10);
+			if (jc_errno != 0) goto error_bad_size_suffix;
+			if (*p != '\0') {
+				while (ss->suffix != NULL && jc_strcaseeq(ss->suffix, p) != 0) ss++;
+				if (ss->suffix == NULL) goto error_bad_size_suffix;
+				min_size *= ss->multiplier;
 			}
+			if (min_size < 0) goto error_bad_size_suffix;
+			fprintf(stderr, "size minimum set to %" PRId64 "\n", min_size);
 			arg_index += 2;
 		} else break;
 	}
@@ -631,6 +604,9 @@ int main(int argc, char **argv)
 	}
 	exit(EXIT_SUCCESS);
 
+error_bad_size_suffix:
+	fprintf(stderr, "Error: bad -s size suffix value\n");
+	exit(EXIT_FAILURE);
 error_same_file:
 	fprintf(stderr, "\nError: the input files appear to be hard linked\n");
 	exit(EXIT_FAILURE);

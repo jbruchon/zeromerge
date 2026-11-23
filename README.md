@@ -39,10 +39,10 @@ Note that the progress indicator for recursive merging shows the merge rate, not
 
 * `-h`, `--help`: Show help and exit.
 * `-v`, `-V`, `--version`: Show version and exit.
-* `-r`, `--recursive`: Recursively scan and merge matching-size files.
+* `-r`: Recursively scan and merge matching-size files.
 * `-s SIZE[suffix]`: Minimum file size in recursive mode (supports raw bytes and size suffixes).
-* `-C <0-18>`: Buffer chunk size index (`4096 << val`, `4 KiB` to `1 GiB`; default `16 MiB`).
-* `-q`, `--quiet`: Suppress progress and status output.
+* `-C <0-18>`: Set I/O chunk size index (`0` = 4K, doubles up to `18` = 1GB; default `12` = 16MB).
+* `-q`: Suppress progress and status output.
 
 ## Building & SIMD
 

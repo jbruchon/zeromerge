@@ -44,10 +44,10 @@ void usage(void)
 	printf("  %s [-C ##] [-q] file1 file2 outfile\n", program_name);
 	printf("  %s [-C ##] [-q] [-s SIZE[suffix]] -r [directories/files...]\n", program_name);
 	printf("\nOptions:\n");
-	printf("  -C ##          Set I/O chunk size index (0 = 4K, doubles up to 18 = 1GB; default 12 = 16MB)\n");
+	printf("  -r             Recursively scan paths, group files by size, merge matches, and link/copy\n");
 	printf("  -s SIZE[suffix] Minimum file size to consider in -r mode; supports K/M/G/T[i]B suffixes\n");
-	printf("  -r, --recursive Recursively scan paths, group files by size, merge matches, and link/copy\n");
-	printf("  -q, --quiet    Suppress all progress and completion output\n");
+	printf("  -C ##          Set I/O chunk size index (0 = 4K, doubles up to 18 = 1GB; default 12 = 16MB)\n");
+	printf("  -q             Suppress all progress and completion output\n");
 	printf("  -h, --help     Display this help and exit\n");
 	printf("  -v, --version  Output version information and exit\n");
 	return;
